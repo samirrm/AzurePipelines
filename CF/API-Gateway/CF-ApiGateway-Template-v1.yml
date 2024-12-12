@@ -1,0 +1,74 @@
+#
+#  SM Template v1
+#
+trigger:
+  branches:
+    include:
+    - refs/heads/dev
+  paths:
+    include:
+    - infra/api_geteway/api-<name-service>cloudFormation.json
+name: $(date:yyyyMMdd)$(rev:.r)
+jobs:
+- job: Job_1
+  displayName: CloudFormation-api<name-service>
+  pool:
+    name: Orisa
+  steps:
+  - checkout: self
+    clean: False
+    persistCredentials: True
+  - task: CopyFiles@2
+    displayName: 'Copy Files to: $(build.artifactstagingdirectory)'
+    inputs:
+      SourceFolder: infra/api_geteway
+      Contents: '*api-<name-service>cloudFormation.json*'
+      TargetFolder: $(build.artifactstagingdirectory)
+      CleanTargetFolder: true
+      OverWrite: true
+  - task: CmdLine@2
+    displayName: Instalar JQ
+    continueOnError: True
+    inputs:
+      script: yum install jq.x86_64 -y
+  - task: CmdLine@2
+    displayName: Check Tags Cloudformation v4
+    inputs:
+      script: "#!/bin/bash\n\ncd $(build.artifactstagingdirectory)\n\n# Variáveis para armazenar as tags requeridas\nrequiredTags=(\"environment\" \"productname\" \"teamname\" \"centercost\")\n\n# Lê as informações do arquivo CloudFormation\ntemplateContent=$(cat *.json)\n\navailableTypes=(\"AWS::EC2::Instance\" \"AWS::EC2::SecurityGroup\" \"AWS::EC2::Subnet\" \"AWS::EC2::VPC\" \"AWS::S3::Bucket\" \"AWS::DynamoDB::Table\" \"AWS::RDS::DBInstance\" \"AWS::RDS::DBCluster\" \"AWS::ElastiCache::CacheCluster\" \"AWS::Elasticsearch::Domain\" \"AWS::Lambda::Function\" \"AWS::StepFunctions::StateMachine\" \"AWS::SQS::Queue\" \"AWS::SNS::Topic\" \"AWS::Kinesis::Stream\" \"AWS::Glue::Job\" \"AWS::Glue::Crawler\" \"AWS::EMR::Cluster\" \"AWS::Redshift::Cluster\" \"AWS::CodePipeline::Pipeline\" \"AWS::CodeBuild::Project\" \"AWS::CodeDeploy::DeploymentGroup\" \"AWS::CloudFront::Distribution\" \"AWS::CloudWatch::Alarm\" \"AWS::CloudFormation::Stack\" \"AWS::CloudTrail::Trail\" \"AWS::IAM::Role\" \"AWS::KMS::Key\" \"AWS::SSM::Document\" \"AWS::SecretsManager::Secret\" \"AWS::GuardDuty::Detector\" \"AWS::ApiGateway::RestApi\" \"AWS::ApiGateway::Stage\")\n\n# Valida as tags de cada recurso no arquivo\nwhile read -r logicalResourceId; do\n  resourceType=$(echo \"$templateContent\" | jq -r \".Resources.\\\"$logicalResourceId\\\".Type\")\n  \n  ## Validaria apenas os recursos que possuem tags\n  # if [ \"$(echo \"$templateContent\" | jq -r \".Resources.\\\"$logicalResourceId\\\".Properties.Tags\" echo \"$templateContent\" | jq -r \".Resources.\\\"$logicalResourceId\\\".Properties.Tags\")\" != \"null\" ]; then\n\n  for type in \"${availableTypes[@]}\"\n  do\n    if [ \"$resourceType\" == \"$type\" ]; then\n\n      # Valida apenas os recursos que possuem tags requeridas\n      missingTags=()\n      for tag in \"${requiredTags[@]}\"; do\n        value=$(echo \"$templateContent\" | jq -r \".Resources.\\\"$logicalResourceId\\\".Properties.Tags[] | select(.Key == \\\"$tag\\\").Value\")\n        if [ -z \"$value\" ]; then\n          missingTags+=(\"$tag\")\n        fi\n      done\n\n      if [ ${#missingTags[@]} -ne 0 ]; then\n        echo \"As seguintes tags estão faltando para o recurso $logicalResourceId ($resourceType):\"\n        for tag in \"${missingTags[@]}\"; do\n          echo \"- $tag\"\n        done\n        exit 1\n      else\n        echo \"O recurso $logicalResourceId ($resourceType) está com suas tags OK!\"\n      fi\n    fi\n  done\ndone < <(echo \"$templateContent\" | jq -r '.Resources | keys[]')"
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: api-<name-service>-$(Build.BuildId)'
+    inputs:
+      PathtoPublish: $(build.artifactstagingdirectory)
+      ArtifactName: api-<name-service>-$(Build.BuildId)
+---
+
+# Release
+
+
+steps:
+- task: AmazonWebServices.aws-vsts-tools.S3Upload.S3Upload@1
+  displayName: 'S3 Upload: '
+  inputs:
+    awsCredentials: '<name>'
+    regionName: 'us-east-1'
+    bucketName: '<var-s3-name>'
+    sourceFolder: '$(System.DefaultWorkingDirectory)/_ApiGateway-<pipe>/ArtifactName/'
+    globExpressions: 'api-<name-service>cloudFormation.json'
+    targetFolder: SuperApp
+    
+- task: AmazonWebServices.aws-vsts-tools.CloudFormationCreateOrUpdateStack.CloudFormationCreateOrUpdateStack@1
+  displayName: 'Create/Update Stack:  STACK-API-<NAME>'
+  inputs:
+    awsCredentials: '<name>'
+    regionName: 'us-east-1'
+    stackName: 'STACK-API-<NAME>'
+    templateSource: url
+    templateUrl: 'https://<var-s3-name>.s3.amazonaws.com/path/api-<name-service>cloudFormation.json'
+    templateParametersSource: inline
+    templateParameters: |
+     [
+     	{
+     		"ParameterKey": "EnvDeploy", 
+     		"ParameterValue": "DEV"
+     	}
+     ]

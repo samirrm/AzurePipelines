@@ -1,0 +1,119 @@
+#### Pipe 01 v1 TerraForm--ECS TerraForm-ECS
+### ARQUIVOS TF em: TerraForm_ECS_Deploy
+
+
+steps:
+- task: PublishBuildArtifacts@1
+  displayName: 'Publish Artifact: Terraform<ENV>'
+  inputs:
+    PathtoPublish: <path>
+    ArtifactName: Terraform<ENV>
+
+---
+
+#### Pipe 02 v1 Container
+
+trigger:
+  branches:
+    include:
+    - refs/heads/main
+  paths:
+    include:
+    - <EMPRESA>.FrontEnd/
+name: $(date:ddMMyyyy)$(rev:.r)
+jobs:
+- job: Job_1
+  displayName: <SERVICO_FRONT_NAME>
+  pool:
+    name: <AGENT_NAME>
+    demands:
+    - agent.name -equals <AGENT_NAME>
+  steps:
+  - checkout: self
+    clean: False
+  - task: YodLabs.VariableTasks.SetVariable.SetVariable@0
+    displayName: Set Variable Front-<SERVICO_FRONT_NAME>
+    inputs:
+      variableName: VERSION_FRONT-<SERVICO_FRONT_NAME>
+      value: $(Build.BuildNumber)-<SERVICO_FRONT_NAME>
+  - task: nkdagility.variablehydration.variabledehydration-task.variabledehydration@0
+    displayName: Save Build Variables Front-<SERVICO_FRONT_NAME>
+    inputs:
+      prefixes: VERSION_FRONT-<SERVICO_FRONT_NAME>
+      outpath: $(Build.ArtifactStagingDirectory)/vsts_variables
+  - task: Docker@2
+    displayName: 'build: Front-<SERVICO_FRONT_NAME>'
+    inputs:
+      repository: $(System.JobDisplayName)
+      command: build
+      Dockerfile: <EMPRESA>.FrontEnd/<SERVICO_FRONT_NAME>-FrontEnd/Dockerfile
+      buildContext: <EMPRESA>.FrontEnd
+      tags: $(Build.BuildNumber)
+      addPipelineData: false
+  - task: AmazonWebServices.aws-vsts-tools.ECRPushImage.ECRPushImage@1
+    displayName: 'Push Image: ECR PROD'
+    inputs:
+      awsCredentials: <CRED_NAME>
+      regionName: sa-east-1
+      sourceImageName: $(System.JobDisplayName)
+      sourceImageTag: $(Build.BuildNumber)
+      repositoryName: <EMPRESA><SERVICO_FRONT_NAME><ENV>
+      pushTag: $(Build.BuildNumber)-<SERVICO_FRONT_NAME>
+      autoCreateRepository: true
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifacts: Front-<SERVICO_FRONT_NAME>'
+    inputs:
+      PathtoPublish: $(Build.ArtifactStagingDirectory)/vsts_variables
+      ArtifactName: VERSION_FRONT-<SERVICO_FRONT_NAME>
+---
+
+
+# Relase
+
+steps:
+- task: nkdagility.variablehydration.variablerehydration-task.variablerehydration@0
+  displayName: 'Load Build Variables <ENV>'
+  inputs:
+    jsonfiles: '$(System.DefaultWorkingDirectory)/_Front-<SERVICO_FRONT_NAME>-ECS-<ENV>/VERSION_FRONT-<SERVICO_FRONT_NAME>/meta-version_front-<SERVICO_FRONT_NAME>.json'
+    
+- task: ms-devlabs.custom-terraform-tasks.custom-terraform-installer-task.TerraformInstaller@0
+  displayName: 'Install Terraform 0.14.5'
+  inputs:
+    terraformVersion: 0.14.5
+    
+- task: ms-devlabs.custom-terraform-tasks.custom-terraform-release-task.TerraformTaskV1@0
+  displayName: 'Terraform : aws init'
+  inputs:
+    provider: aws
+    workingDirectory: '$(System.DefaultWorkingDirectory)/_TerraForm-<SERVICO_FRONT_NAME>-ECS-<ENV>/Terraform<ENV>'
+    backendServiceAWS: 'CONECT TERRA <ENV>-<NAME>'
+    backendAWSBucketName: '<EMPRESA>-<SERVICO_FRONT_NAME>-s3-terraform-<ENV>'
+    backendAWSKey: '<EMPRESA>-<SERVICO_FRONT_NAME>-s3-terraform-<ENV>'
+    
+- task: ms-devlabs.custom-terraform-tasks.custom-terraform-release-task.TerraformTaskV1@0
+  displayName: 'Terraform : aws plan'
+  inputs:
+    provider: aws
+    command: plan
+    workingDirectory: '$(System.DefaultWorkingDirectory)/_TerraForm-<SERVICO_FRONT_NAME>-ECS-<ENV>/Terraform<ENV>'
+    environmentServiceNameAWS: 'CONECT TERRA <ENV>-<NAME>'
+    
+- task: ms-devlabs.custom-terraform-tasks.custom-terraform-release-task.TerraformTaskV1@0
+  displayName: 'Terraform : aws validate and apply'
+  inputs:
+    provider: aws
+    command: apply
+    workingDirectory: '$(System.DefaultWorkingDirectory)/_TerraForm-<SERVICO_FRONT_NAME>-ECS-<ENV>/Terraform<ENV>'
+    commandOptions: '-auto-approve -input=false -var FrontImage="000000000000.dkr.ecr.sa-east-1.amazonaws.com/<EMPRESA><SERVICO_FRONT_NAME><ENV>:$(VERSION_FRONT-<SERVICO_FRONT_NAME>)"'
+    environmentServiceNameAWS: 'CONECT TERRA <ENV>-<NAME>'
+    
+
+- task: ms-devlabs.custom-terraform-tasks.custom-terraform-release-task.TerraformTaskV1@0
+  displayName: 'Terraform : aws destroy'
+  inputs:
+    provider: aws
+    command: destroy
+    workingDirectory: '$(System.DefaultWorkingDirectory)/_TerraForm-<SERVICO_FRONT_NAME>-ECS-<ENV>/Terraform<ENV>'
+    commandOptions: '-auto-approve'
+    environmentServiceNameAWS: 'CONECT TERRA <ENV>-<NAME>'
+  enabled: false

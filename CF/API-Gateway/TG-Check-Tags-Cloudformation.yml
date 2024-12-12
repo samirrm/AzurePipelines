@@ -1,0 +1,54 @@
+# Task groups > Check Tags Cloudformation
+
+steps:
+- script: 'yum install jq.x86_64 -y'
+  displayName: 'Instalar JQ'
+  continueOnError: true
+
+steps:
+- script: |
+   #!/bin/bash
+   
+   cd $(build.artifactstagingdirectory)
+   
+   # Variáveis para armazenar as tags requeridas
+   requiredTags=("environment" "productname" "teamname" "centercost")
+   
+   # Lê as informações do arquivo CloudFormation
+   templateContent=$(cat *.json)
+   
+   availableTypes=("AWS::EC2::Instance" "AWS::EC2::SecurityGroup" "AWS::EC2::Subnet" "AWS::EC2::VPC" "AWS::S3::Bucket" "AWS::DynamoDB::Table" "AWS::RDS::DBInstance" "AWS::RDS::DBCluster" "AWS::ElastiCache::CacheCluster" "AWS::Elasticsearch::Domain" "AWS::Lambda::Function" "AWS::StepFunctions::StateMachine" "AWS::SQS::Queue" "AWS::SNS::Topic" "AWS::Kinesis::Stream" "AWS::Glue::Job" "AWS::Glue::Crawler" "AWS::EMR::Cluster" "AWS::Redshift::Cluster" "AWS::CodePipeline::Pipeline" "AWS::CodeBuild::Project" "AWS::CodeDeploy::DeploymentGroup" "AWS::CloudFront::Distribution" "AWS::CloudWatch::Alarm" "AWS::CloudFormation::Stack" "AWS::CloudTrail::Trail" "AWS::IAM::Role" "AWS::KMS::Key" "AWS::SSM::Document" "AWS::SecretsManager::Secret" "AWS::GuardDuty::Detector" "AWS::ApiGateway::RestApi" "AWS::ApiGateway::Stage")
+   
+   # Valida as tags de cada recurso no arquivo
+   while read -r logicalResourceId; do
+     resourceType=$(echo "$templateContent" | jq -r ".Resources.\"$logicalResourceId\".Type")
+     
+     ## Validaria apenas os recursos que possuem tags
+     # if [ "$(echo "$templateContent" | jq -r ".Resources.\"$logicalResourceId\".Properties.Tags")" != "null" ]; then
+   
+     for type in "${availableTypes[@]}"
+     do
+       if [ "$resourceType" == "$type" ]; then
+   
+         # Valida apenas os recursos que possuem tags requeridas
+         missingTags=()
+         for tag in "${requiredTags[@]}"; do
+           value=$(echo "$templateContent" | jq -r ".Resources.\"$logicalResourceId\".Properties.Tags[] | select(.Key == \"$tag\").Value")
+           if [ -z "$value" ]; then
+             missingTags+=("$tag")
+           fi
+         done
+   
+         if [ ${#missingTags[@]} -ne 0 ]; then
+           echo "As seguintes tags estão faltando para o recurso $logicalResourceId ($resourceType):"
+           for tag in "${missingTags[@]}"; do
+             echo "- $tag"
+           done
+           exit 1
+         else
+           echo "O recurso $logicalResourceId ($resourceType) está com suas tags OK!"
+         fi
+       fi
+     done
+   done < <(echo "$templateContent" | jq -r '.Resources | keys[]')
+  displayName: 'Check Tags Cloudformation v4'

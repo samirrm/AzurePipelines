@@ -1,0 +1,77 @@
+trigger:  
+  branches:
+    include:
+     - '*'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  nodeVersion: '16.19.1'
+
+jobs:
+- job: Build
+  steps:
+  - task: UseNode@1
+    displayName: 'Usar o Node.js $(nodeVersion)'
+    inputs:
+      version: $(nodeVersion)
+      checkLatest: false
+
+  - task: CmdLine@2
+    displayName: 'Instalar Yarn'
+    inputs:
+      script: 'npm install -g yarn'
+
+  - script: |
+      cd frontend
+      yarn global add react-native@0.64.2
+    displayName: 'Instalar React Native'
+
+  - script: |
+      cd frontend
+      yarn install --network-timeout 100000
+      npm install --save-dev jetifier
+      npx jetify
+    displayName: 'Baixar os demais pacotes'
+
+  - task: JavaToolInstaller@0
+    inputs:
+      versionSpec: '8'
+      jdkArchitectureOption: 'x64'
+      jdkSourceOption: 'PreInstalled'
+
+  - script: |
+      mkdir -p $HOME/android/sdk
+      cd $HOME/android/sdk
+      wget https://dl.google.com/android/repository/commandlinetools-linux-9123335_latest.zip
+      unzip commandlinetools-linux-9123335_latest.zip
+      rm commandlinetools-linux-9123335_latest.zip
+      cd cmdline-tools 
+      mkdir tools
+      mv -i * tools
+      cd tools/bin
+      ls
+      yes | ./sdkmanager --licenses
+      ./sdkmanager "build-tools;30.0.2"
+      ./sdkmanager "platforms;android-31"
+    displayName: 'Instalar e Configurar o SDK do Android'
+
+  - script: |
+      cd frontend/android
+      if [ "$(Build.SourceBranch)" == "refs/heads/main" ]; then
+        yarn android:prod-aab   
+      else
+        yarn android:dev-apk
+      fi   
+    displayName: 'Gerar o APK ou aab'
+
+
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publicar Artefato'
+    condition: eq(variables['Build.Reason'], 'IndividualCI')  
+    inputs:
+      PathtoPublish: 'frontend/android/app/build/outputs/apk/'
+      ArtifactName: 'ApkArtifact'
+
+

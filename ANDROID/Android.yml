@@ -1,0 +1,66 @@
+
+trigger:
+  branches:
+    include:
+    - refs/heads/main
+jobs:
+- job: Job_1
+  displayName: BrowserStack Automation
+  pool: {}
+  steps:
+  - checkout: self
+  - task: NodeTool@0
+    displayName: Use Node 16.x
+    inputs:
+      versionSpec: 16.x
+      checkLatest: true
+  - task: browserstackcom.browserstack-vsts-extension.browserstack-config-task.BrowserStackConfig@0
+    displayName: BrowserStack configuration setup
+    inputs:
+      BrowserStackServiceEndPoint: <000000>
+      browserstackLocal: true
+  - task: Npm@1
+    displayName: ' Install dependencies'
+    inputs:
+      command: ci
+      verbose: false
+      customCommand: npm install --global --production windows-build-tools
+  - task: PowerShell@2
+    displayName: PowerShell Script atualizar pacotes
+    enabled: False
+    inputs:
+      targetType: inline
+      script: >
+        npm i -D typescript ts-node
+  - task: Bash@3
+    displayName: Bash Script
+    enabled: False
+    inputs:
+      targetType: inline
+      script: >-
+        npm i -D typescript ts-node
+
+        npm run androidStack
+  - task: PowerShell@2
+    displayName: PowerShell NPM Cypress
+    inputs:
+      targetType: inline
+      script: npm i -D typescript ts-node ; npm run androidStack
+  - task: MaciejMaciejewski.azure-pipelines-cucumber.PublishCucumberReport.PublishCucumberReport@1
+    displayName: Publish Cucumber Report
+    condition: succeededOrFailed()
+    continueOnError: True
+    inputs:
+      jsonDir: ./reports/json/
+      outputPath: ./reports/json/
+      name: Cucumber result
+      title: Publish cucumber results
+  - task: PublishPipelineArtifact@0
+    displayName: Publish html wdio
+    condition: succeededOrFailed()
+    inputs:
+      artifactName: Publish html
+      targetPath: reports/html
+  - task: browserstackcom.browserstack-vsts-extension.stop-local-task.BrowserStackStopLocal@0
+    displayName: BrowserStack Stop Local
+...
